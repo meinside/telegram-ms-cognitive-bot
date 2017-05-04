@@ -1,0 +1,8 @@
+{
+	"telegram-api-token": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+	"telegram-monitor-interval-seconds": 3,
+	"ms-emotion-subscription-key": "AAAAAAAAAAAAAAAAAAAAAAA",
+	"ms-computervision-subscription-key": "BBBBBBBBBBBBBBBBBBBBBBB",
+	"ms-face-subscription-key": "CCCCCCCCCCCCCCCCCCCCCCC"
+	"is-verbose": true
+}

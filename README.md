@@ -2,7 +2,24 @@
 
 This Telegram Bot was built for showing how to use [Go library for MS Cognitive Services](https://github.com/meinside/ms-cognitive-services-go).
 
-## How to Install & Build
+## Preparation
+
+Install essential libraries and packages:
+
+```bash
+# for freetype font
+$ sudo apt-get install libgl1-mesa-dev
+$ go get github.com/golang/freetype/...
+$ go get github.com/llgcode/draw2d/...
+
+# for telegram bot api
+$ go get github.com/meinside/telegram-bot-go
+
+# for ms cognitive services
+$ go get github.com/meinside/ms-cognitive-services-go/...
+```
+
+## Install & Build
 
 ```bash
 $ git clone https://github.com/meinside/telegram-ms-cognitive-bot.git

@@ -86,6 +86,8 @@ const (
 - OCR
 - Handwritten Text Recognition
 - Tag This Image
+
+then it will send the result message or image back to you.
 `
 
 	CommandCancel = "cancel"
@@ -167,8 +169,10 @@ func processUpdate(b *bot.Bot, update bot.Update) bool {
 	var options map[string]interface{} = map[string]interface{}{}
 
 	if update.Message.HasPhoto() {
+		lastIndex := len(update.Message.Photo) - 1 // XXX - last one is the largest
+
 		options["reply_markup"] = bot.InlineKeyboardMarkup{
-			InlineKeyboard: genImageInlineKeyboards(*update.Message.Photo[0].FileId),
+			InlineKeyboard: genImageInlineKeyboards(*update.Message.Photo[lastIndex].FileId),
 		}
 		message = MessageActionImage
 	} else if update.Message.HasDocument() && strings.HasPrefix(*update.Message.Document.MimeType, "image/") {

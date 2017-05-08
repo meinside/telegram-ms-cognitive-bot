@@ -57,6 +57,29 @@ After all things are setup correctly, just run the built binary:
 $ ./telegram-ms-cognitive-bot
 ```
 
+## How to Run as a Service
+
+### a. systemd
+
+```bash
+$ sudo cp systemd/telegram-ms-cognitive-bot.service /lib/systemd/system/
+$ sudo vi /lib/systemd/system/telegram-ms-cognitive-bot.service
+```
+
+and edit **User**, **Group**, **WorkingDirectory** and **ExecStart** values.
+
+It will launch automatically on boot with:
+
+```bash
+$ sudo systemctl enable telegram-ms-cognitive-bot.service
+```
+
+and will start with:
+
+```bash
+$ sudo systemctl start telegram-ms-cognitive-bot.service
+```
+
 ## License
 
 MIT

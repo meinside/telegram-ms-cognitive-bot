@@ -1,0 +1,17 @@
+[Unit]
+Description=MS Congnitive Services Telegram Bot
+After=syslog.target
+After=network.target
+
+[Service]
+Type=simple
+User=some_user
+Group=some_user
+WorkingDirectory=/path/to/telegram-ms-cognitive-bot
+ExecStart=/path/to/telegram-ms-cognitive-bot/telegram-ms-cognitive-bot
+Restart=always
+RestartSec=5
+Environment=
+
+[Install]
+WantedBy=multi-user.target

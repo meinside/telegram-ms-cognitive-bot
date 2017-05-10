@@ -30,9 +30,24 @@ import (
 
 	// for Telegram bot
 	bot "github.com/meinside/telegram-bot-go"
+
+	// for logging on Loggly
+	"github.com/meinside/loggly-go"
 )
 
 var client *bot.Bot = nil
+var logger *loggly.Loggly = nil
+
+const (
+	AppName = "MSCognitiveServicesBot"
+)
+
+type LogglyLog struct {
+	Application string      `json:"app"`
+	Severity    string      `json:"severity"`
+	Message     string      `json:"message,omitempty"`
+	Object      interface{} `json:"obj,omitempty"`
+}
 
 type CognitiveCommand string
 
@@ -107,6 +122,7 @@ type Config struct {
 	MsEmotionSubscriptionKey        string `json:"ms-emotion-subscription-key"`
 	MsComputervisionSubscriptionKey string `json:"ms-computervision-subscription-key"`
 	MsFaceSubscriptionKey           string `json:"ms-face-subscription-key"`
+	LogglyToken                     string `json:"loggly-token,omitempty"`
 	IsVerbose                       bool   `json:"is-verbose"`
 }
 
@@ -137,6 +153,11 @@ func init() {
 	// telegram
 	client = bot.NewClient(conf.TelegramApiToken)
 	client.Verbose = conf.IsVerbose
+
+	// loggly
+	if conf.LogglyToken != "" {
+		logger = loggly.New(conf.LogglyToken)
+	}
 
 	// others
 	if bytes, err := ioutil.ReadFile(FontFilepath); err == nil {
@@ -188,7 +209,7 @@ func processUpdate(b *bot.Bot, update bot.Update) bool {
 	if sent := b.SendMessage(update.Message.Chat.Id, &message, options); sent.Ok {
 		result = true
 	} else {
-		log.Printf("Failed to send message: %s", *sent.Description)
+		logError(fmt.Sprintf("Failed to send message: %s", *sent.Description))
 	}
 
 	return result
@@ -199,6 +220,7 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 	// process result
 	result := false
 
+	var username string
 	message := ""
 	query := *update.CallbackQuery
 	data := *query.Data
@@ -216,11 +238,19 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 				go processImage(b, query.Message.Chat.Id, fileUrl, command)
 
 				message = fmt.Sprintf("Processing '%s' on received image...", command)
+
+				// log request
+				if query.From.Username == nil {
+					username = *query.From.FirstName
+				} else {
+					username = *query.From.Username
+				}
+				logRequest(username, fileUrl, command)
 			} else {
 				message = MessageUnprocessable
 			}
 		} else {
-			log.Printf("Failed to get file from url: %s", *fileResult.Description)
+			logError(fmt.Sprintf("Failed to get file from url: %s", *fileResult.Description))
 
 			message = MessageFailedToGetFile
 		}
@@ -236,10 +266,10 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 		if apiResult := b.EditMessageText(&message, options); apiResult.Ok {
 			result = true
 		} else {
-			log.Printf("Failed to edit message text: %s", *apiResult.Description)
+			logError(fmt.Sprintf("Failed to edit message text: %s", *apiResult.Description))
 		}
 	} else {
-		log.Printf("Failed to answer callback query: %+v", query)
+		logError(fmt.Sprintf("Failed to answer callback query: %+v", query))
 	}
 
 	return result
@@ -307,7 +337,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 									int(fc.PointToFixed(float64(rect.Top+rect.Height)+fontSize)>>6),
 								),
 							); err != nil {
-								log.Printf("Failed to draw string: %s", err)
+								logError(fmt.Sprintf("Failed to draw string: %s", err))
 							}
 
 							// emotion string
@@ -405,7 +435,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 									int(fc.PointToFixed(float64(rect.Top+rect.Height)+fontSize)>>6),
 								),
 							); err != nil {
-								log.Printf("Failed to draw string: %s", err)
+								logError(fmt.Sprintf("Failed to draw string: %s", err))
 							}
 
 							// mark face landmarks
@@ -566,7 +596,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 	if errorMessage != "" {
 		b.SendMessage(chatId, &errorMessage, nil)
 
-		log.Println(errorMessage)
+		logError(errorMessage)
 	}
 }
 
@@ -587,7 +617,7 @@ func main() {
 
 	// get info about this bot
 	if me := client.GetMe(); me.Ok {
-		log.Printf("Launching bot: @%s (%s)", *me.Result.Username, *me.Result.FirstName)
+		logMessage(fmt.Sprintf("Starting bot: @%s (%s)", *me.Result.Username, *me.Result.FirstName))
 
 		// delete webhook (getting updates will not work when wehbook is set up)
 		if unhooked := client.DeleteWebhook(); unhooked.Ok {
@@ -602,10 +632,10 @@ func main() {
 						} else if update.HasCallbackQuery() {
 							processCallbackQuery(b, update) // process callback query
 						} else {
-							log.Printf("Update not processable")
+							logError("Update not processable")
 						}
 					} else {
-						log.Printf("Error while receiving update (%s)", err)
+						logError(fmt.Sprintf("Error while receiving update (%s)", err))
 					}
 				},
 			)
@@ -614,5 +644,47 @@ func main() {
 		}
 	} else {
 		panic("Failed to get info of the bot")
+	}
+}
+
+func logMessage(message string) {
+	log.Println(message)
+
+	if logger != nil {
+		logger.Log(LogglyLog{
+			Application: AppName,
+			Severity:    "Log",
+			Message:     message,
+		})
+	}
+}
+
+func logError(message string) {
+	log.Println(message)
+
+	if logger != nil {
+		logger.Log(LogglyLog{
+			Application: AppName,
+			Severity:    "Error",
+			Message:     message,
+		})
+	}
+}
+
+func logRequest(username, fileUrl string, command CognitiveCommand) {
+	if logger != nil {
+		logger.Log(LogglyLog{
+			Application: AppName,
+			Severity:    "Verbose",
+			Object: struct {
+				Username string           `json:"username"`
+				FileUrl  string           `json:"file_url"`
+				Command  CognitiveCommand `json:"command"`
+			}{
+				Username: username,
+				FileUrl:  fileUrl,
+				Command:  command,
+			},
+		})
 	}
 }

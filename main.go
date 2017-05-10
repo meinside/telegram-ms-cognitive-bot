@@ -140,6 +140,11 @@ func init() {
 		}
 	}
 
+	// check values
+	if conf.TelegramMonitorIntervalSeconds <= 0 {
+		conf.TelegramMonitorIntervalSeconds = 1
+	}
+
 	// ms cognitive services
 	emotionClient = emotion.NewClient(conf.MsEmotionSubscriptionKey)
 	cvClient = cv.NewClient(conf.MsComputervisionSubscriptionKey)

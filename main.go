@@ -103,6 +103,8 @@ const (
 - Tag This Image
 
 then it will send the result message or image back to you.
+
+* Github: https://github.com/meinside/telegram-ms-cognitive-bot
 `
 
 	CommandCancel = "cancel"

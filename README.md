@@ -17,6 +17,9 @@ $ go get github.com/meinside/telegram-bot-go
 
 # for ms cognitive services
 $ go get github.com/meinside/ms-cognitive-services-go/...
+
+# for loggly
+$ go get github.com/meinside/loggly-go
 ```
 
 ## Install & Build

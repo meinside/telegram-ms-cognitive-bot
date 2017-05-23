@@ -1,5 +1,7 @@
 package main
 
+// helper functions
+
 import (
 	"bytes"
 	"fmt"

@@ -7,10 +7,11 @@ This Telegram Bot was built for showing how to use [Go library for MS Cognitive 
 Install essential libraries and packages:
 
 ```bash
-# for freetype font
+# for freetype font and image manipulation
 $ sudo apt-get install libgl1-mesa-dev
 $ go get github.com/golang/freetype/...
 $ go get github.com/llgcode/draw2d/...
+$ go get github.com/disintegration/gift
 
 # for telegram bot api
 $ go get github.com/meinside/telegram-bot-go

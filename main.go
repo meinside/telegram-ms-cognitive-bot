@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
-	// for drawing rects and numbers on images
+	// for manipulating images
 	"bytes"
+	"github.com/disintegration/gift"
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
 	"github.com/llgcode/draw2d/draw2dimg"
@@ -20,7 +22,6 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"math"
-	"net/http"
 
 	// for MS Cognitive Services
 	cog "github.com/meinside/ms-cognitive-services-go"
@@ -59,6 +60,10 @@ const (
 	Ocr         CognitiveCommand = "OCR"
 	Handwritten CognitiveCommand = "Handwritten Text Recognition"
 	Tag         CognitiveCommand = "Tag This Image"
+
+	// fun commands
+	CensorEyes CognitiveCommand = "Censor Eyes"
+	MaskFaces  CognitiveCommand = "Mask Faces"
 )
 
 // XXX - When a new command is added, add it here too.
@@ -69,6 +74,10 @@ var allCmds = []CognitiveCommand{
 	Ocr,
 	Handwritten,
 	Tag,
+
+	// fun commands
+	CensorEyes,
+	MaskFaces,
 }
 var shortCmdsMap = map[CognitiveCommand]string{}
 var cmdsMap = map[string]CognitiveCommand{}
@@ -87,6 +96,7 @@ var colors = []color.RGBA{
 	color.RGBA{0, 0, 255, 255},   // blue
 	color.RGBA{255, 0, 0, 255},   // red
 }
+var maskColor = color.RGBA{0, 0, 0, 255} // black
 
 const (
 	MessageActionImage     = "Choose action for this image:"
@@ -180,7 +190,7 @@ func init() {
 
 func genImageInlineKeyboards(fileId string) [][]bot.InlineKeyboardButton {
 	data := map[string]string{}
-	for _, cmd := range []CognitiveCommand{Emotion, Face, Describe, Ocr, Handwritten, Tag} {
+	for _, cmd := range allCmds {
 		data[string(cmd)] = fmt.Sprintf("%s%s", shortCmdsMap[cmd], fileId)
 	}
 
@@ -194,7 +204,9 @@ func processUpdate(b *bot.Bot, update bot.Update) bool {
 	result := false // process result
 
 	var message string
-	var options map[string]interface{} = map[string]interface{}{}
+	var options = map[string]interface{}{
+		"reply_to_message_id": update.Message.MessageId,
+	}
 
 	if update.Message.HasPhoto() {
 		lastIndex := len(update.Message.Photo) - 1 // XXX - last one is the largest
@@ -242,7 +254,7 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 			fileUrl := b.GetFileUrl(*fileResult.Result)
 
 			if strings.Contains(*query.Message.Text, "image") {
-				go processImage(b, query.Message.Chat.Id, fileUrl, command)
+				go processImage(b, query.Message.Chat.Id, query.Message.MessageId, fileUrl, command)
 
 				message = fmt.Sprintf("Processing '%s' on received image...", command)
 
@@ -283,7 +295,7 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 }
 
 // process requested image processing
-func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCommand) {
+func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl string, command CognitiveCommand) {
 	message := ""
 	errorMessage := ""
 
@@ -301,7 +313,6 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 					if img, _, err := image.Decode(resp.Body); err == nil {
 						var rect cog.Rectangle
 						var emos []string
-						var scores []string
 
 						// copy to a new image
 						newImg := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
@@ -320,6 +331,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 						fc.SetFontSize(fontSize)
 
 						for i, e := range emotions {
+							var scores []string
 							rect = e.FaceRectangle
 
 							// set color
@@ -358,7 +370,13 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 						// build up emotions string
 						var strs []string
 						for i, e := range emos {
-							strs = append(strs, fmt.Sprintf("[Face #%d]\n%s", i+1, e))
+							strs = append(strs,
+								fmt.Sprintf(`[Face #%d]
+%s`,
+									i+1,
+									e,
+								),
+							)
 						}
 						message = fmt.Sprintf("%s", strings.Join(strs, "\n\n"))
 
@@ -368,13 +386,17 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 						// send a photo with rectangles drawn on detected faces
 						buf := new(bytes.Buffer)
 						if err := jpeg.Encode(buf, newImg, nil); err == nil {
-							if sent := b.SendPhotoWithBytes(chatId, buf.Bytes(), nil); sent.Ok {
+							if sent := b.SendPhotoWithBytes(chatId, buf.Bytes(), map[string]interface{}{
+								"caption": fmt.Sprintf("Process result of '%s'", command),
+							}); sent.Ok {
 								// send emotions string
-								if sent := b.SendMessage(chatId, &message, nil); !sent.Ok {
+								if sent := b.SendMessage(chatId, &message, map[string]interface{}{
+									"reply_to_message_id": sent.Result.MessageId,
+								}); !sent.Ok {
 									errorMessage = fmt.Sprintf("Failed to send emotions: %s", *sent.Description)
 								}
 							} else {
-								errorMessage = fmt.Sprintf("Failed to send a marked image: %s", *sent.Description)
+								errorMessage = fmt.Sprintf("Failed to send image: %s", *sent.Description)
 							}
 						}
 					} else {
@@ -384,12 +406,12 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 					errorMessage = fmt.Sprintf("Failed to open image: %s", err)
 				}
 			} else {
-				errorMessage = "No emotion recognized. Given image may be too small or low-quality."
+				errorMessage = "No emotion recognized on this image."
 			}
 		} else {
 			errorMessage = fmt.Sprintf("Failed to recognize emotion: %s", err)
 		}
-	case Face:
+	case Face, CensorEyes, MaskFaces:
 		if faces, err := faceClient.Detect(fileUrl, true, true, []string{"age", "gender", "headPose", "smile", "facialHair", "glasses", "emotion"}); err == nil {
 			if len(faces) > 0 {
 				// open image from url,
@@ -405,91 +427,171 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 						gc.SetLineWidth(StrokeWidth)
 						gc.SetFillColor(color.Transparent)
 
-						// prepare freetype font
-						fc := freetype.NewContext()
-						fc.SetFont(font)
-						fc.SetDPI(72)
-						fc.SetClip(newImg.Bounds())
-						fc.SetDst(newImg)
-						fontSize := float64(newImg.Bounds().Dy()) / 24.0
-						fc.SetFontSize(fontSize)
-
 						// build up facial attributes string
 						strs := []string{}
 						var facialHairs, headPoses, emotions []string
 						for i, f := range faces {
-							rect = f.FaceRectangle
+							switch command {
+							case Face:
+								// prepare freetype font
+								fc := freetype.NewContext()
+								fc.SetFont(font)
+								fc.SetDPI(72)
+								fc.SetClip(newImg.Bounds())
+								fc.SetDst(newImg)
+								fontSize := float64(newImg.Bounds().Dy()) / 24.0
+								fc.SetFontSize(fontSize)
 
-							// set color
-							color := colorForIndex(i)
-							gc.SetStrokeColor(color)
-							fc.SetSrc(&image.Uniform{color})
+								// set color
+								color := colorForIndex(i)
+								gc.SetStrokeColor(color)
+								fc.SetSrc(&image.Uniform{color})
 
-							// draw rectangles and their indices on detected faces
-							gc.MoveTo(float64(rect.Left), float64(rect.Top))
-							gc.LineTo(float64(rect.Left+rect.Width), float64(rect.Top))
-							gc.LineTo(float64(rect.Left+rect.Width), float64(rect.Top+rect.Height))
-							gc.LineTo(float64(rect.Left), float64(rect.Top+rect.Height))
-							gc.LineTo(float64(rect.Left), float64(rect.Top))
-							gc.Close()
-							gc.FillStroke()
-
-							// draw face label
-							if _, err = fc.DrawString(
-								fmt.Sprintf("Face #%d", i+1),
-								freetype.Pt(
-									rect.Left,
-									int(fc.PointToFixed(float64(rect.Top+rect.Height)+fontSize)>>6),
-								),
-							); err != nil {
-								logError(fmt.Sprintf("Failed to draw string: %s", err))
-							}
-
-							// mark face landmarks
-							if p, exists := f.FaceLandmarks["noseTip"]; exists { // nose tip
-								gc.MoveTo(float64(p.X), float64(p.Y))
-								gc.ArcTo(float64(p.X), float64(p.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
+								// draw rectangles and their indices on detected faces
+								rect = f.FaceRectangle
+								gc.MoveTo(float64(rect.Left), float64(rect.Top))
+								gc.LineTo(float64(rect.Left+rect.Width), float64(rect.Top))
+								gc.LineTo(float64(rect.Left+rect.Width), float64(rect.Top+rect.Height))
+								gc.LineTo(float64(rect.Left), float64(rect.Top+rect.Height))
+								gc.LineTo(float64(rect.Left), float64(rect.Top))
 								gc.Close()
 								gc.FillStroke()
-							}
-							if p, exists := f.FaceLandmarks["pupilRight"]; exists { // right pupil
-								gc.MoveTo(float64(p.X), float64(p.Y))
-								gc.ArcTo(float64(p.X), float64(p.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
-								gc.Close()
-								gc.FillStroke()
-							}
-							if p, exists := f.FaceLandmarks["pupilLeft"]; exists { // left pupil
-								gc.MoveTo(float64(p.X), float64(p.Y))
-								gc.ArcTo(float64(p.X), float64(p.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
-								gc.Close()
-								gc.FillStroke()
-							}
-							if p1, exists := f.FaceLandmarks["mouthRight"]; exists { // mouth
-								if p2, exists := f.FaceLandmarks["mouthLeft"]; exists {
-									gc.MoveTo(float64(p1.X), float64(p1.Y))
-									gc.LineTo(float64(p2.X), float64(p2.Y))
+
+								// draw face label
+								if _, err = fc.DrawString(
+									fmt.Sprintf("Face #%d", i+1),
+									freetype.Pt(
+										rect.Left,
+										int(fc.PointToFixed(float64(rect.Top+rect.Height)+fontSize)>>6),
+									),
+								); err != nil {
+									logError(fmt.Sprintf("Failed to draw string: %s", err))
+								}
+
+								// mark face landmarks
+								if hasAllKeys([]string{
+									"noseTip",
+									"pupilRight",
+									"pupilLeft",
+									"mouthRight",
+									"mouthLeft",
+								}, f.FaceLandmarks) {
+									// nose tip
+									n, _ := f.FaceLandmarks["noseTip"]
+									gc.MoveTo(float64(n.X), float64(n.Y))
+									gc.ArcTo(float64(n.X), float64(n.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
+									gc.Close()
+									gc.FillStroke()
+
+									// right pupil
+									r, _ := f.FaceLandmarks["pupilRight"]
+									gc.MoveTo(float64(r.X), float64(r.Y))
+									gc.ArcTo(float64(r.X), float64(r.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
+									gc.Close()
+									gc.FillStroke()
+
+									// left pupil
+									l, _ := f.FaceLandmarks["pupilLeft"]
+									gc.MoveTo(float64(l.X), float64(l.Y))
+									gc.ArcTo(float64(l.X), float64(l.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
+									gc.Close()
+									gc.FillStroke()
+
+									// mouth
+									m1, _ := f.FaceLandmarks["mouthRight"]
+									m2, _ := f.FaceLandmarks["mouthLeft"]
+									gc.MoveTo(float64(m1.X), float64(m1.Y))
+									gc.LineTo(float64(m2.X), float64(m2.Y))
 									gc.Close()
 									gc.FillStroke()
 								}
-							}
 
-							facialHairs = []string{}
-							for k, v := range f.FaceAttributes.FacialHair {
-								facialHairs = append(facialHairs, fmt.Sprintf("  %s: %.3f%%", k, v*100.0))
-							}
-							headPoses = []string{}
-							for k, v := range f.FaceAttributes.HeadPose {
-								headPoses = append(headPoses, fmt.Sprintf("  %s: %.2f°", k, v))
-							}
-							emotions = []string{}
-							for k, v := range f.FaceAttributes.Emotion {
-								emotions = append(emotions, fmt.Sprintf("  %s: %.3f%%", k, v*100.0))
-							}
+								// descriptions
+								facialHairs = []string{}
+								for k, v := range f.FaceAttributes.FacialHair {
+									facialHairs = append(facialHairs, fmt.Sprintf("  %s: %.3f%%", k, v*100.0))
+								}
+								headPoses = []string{}
+								for k, v := range f.FaceAttributes.HeadPose {
+									headPoses = append(headPoses, fmt.Sprintf("  %s: %.2f°", k, v))
+								}
+								emotions = []string{}
+								for k, v := range f.FaceAttributes.Emotion {
+									emotions = append(emotions, fmt.Sprintf("  %s: %.3f%%", k, v*100.0))
+								}
 
-							strs = append(strs, fmt.Sprintf("[Face #%d]\n> Facial Hair\n%s\n> Head Pose\n%s\n> Emotion\n%s", i+1, strings.Join(facialHairs, "\n"), strings.Join(headPoses, "\n"), strings.Join(emotions, "\n")))
+								strs = append(strs,
+									fmt.Sprintf(`[Face #%d]
+> Facial Hair
+%s
+> Head Pose
+%s
+> Emotion
+%s`,
+										i+1,
+										strings.Join(facialHairs, "\n"),
+										strings.Join(headPoses, "\n"),
+										strings.Join(emotions, "\n"),
+									),
+								)
+							case CensorEyes:
+								if hasAllKeys([]string{
+									"eyeLeftTop",
+									"eyeLeftBottom",
+									"eyeLeftOuter",
+									"eyeRightTop",
+									"eyeRightBottom",
+									"eyeRightOuter",
+								}, f.FaceLandmarks) {
+									// points
+									lt, _ := f.FaceLandmarks["eyeLeftTop"]
+									lb, _ := f.FaceLandmarks["eyeLeftBottom"]
+									lo, _ := f.FaceLandmarks["eyeLeftOuter"]
+									rt, _ := f.FaceLandmarks["eyeRightTop"]
+									rb, _ := f.FaceLandmarks["eyeRightBottom"]
+									ro, _ := f.FaceLandmarks["eyeRightOuter"]
+
+									// mask size
+									w := math.Abs(float64(lo.X) - float64(ro.X))
+									h := math.Abs(math.Min(float64(lt.Y), float64(rt.Y)) - math.Max(float64(lb.Y), float64(rb.Y)))
+									marginX, marginY := w*0.2, h*0.3
+
+									// set mask color
+									gc.SetFillColor(maskColor)
+
+									// fill mask rectangle
+									gc.MoveTo(float64(lo.X)-marginX, math.Min(float64(lt.Y), float64(rt.Y))-marginY)
+									gc.LineTo(float64(ro.X)+marginX, math.Min(float64(lt.Y), float64(rt.Y))-marginY)
+									gc.LineTo(float64(ro.X)+marginX, math.Max(float64(lb.Y), float64(rb.Y))+marginY)
+									gc.LineTo(float64(lo.X)-marginX, math.Max(float64(lb.Y), float64(rb.Y))+marginY)
+									gc.LineTo(float64(lo.X)-marginX, math.Min(float64(lt.Y), float64(rt.Y))-marginY)
+									gc.Close()
+									gc.Fill()
+								}
+							case MaskFaces:
+								rect = f.FaceRectangle
+
+								// pixelate face rects
+								g := gift.New(
+									gift.Pixelate(rect.Width / 8),
+								)
+								g.DrawAt(
+									newImg,
+									newImg.SubImage(image.Rect(rect.Left, rect.Top, rect.Left+rect.Width, rect.Top+rect.Height)),
+									image.Pt(rect.Left, rect.Top),
+									gift.CopyOperator,
+								)
+							}
 						}
 						gc.Save()
-						message = fmt.Sprintf("%s", strings.Join(strs, "\n\n"))
+
+						// build up message
+						switch command {
+						case Face:
+							message = strings.Join(strs, "\n\n")
+						default:
+							message = ""
+						}
 
 						// 'uploading photo...'
 						b.SendChatAction(chatId, bot.ChatActionUploadPhoto)
@@ -497,14 +599,28 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 						// send a photo with rectangles drawn on detected faces
 						buf := new(bytes.Buffer)
 						if err := jpeg.Encode(buf, newImg, nil); err == nil {
-							if sent := b.SendPhotoWithBytes(chatId, buf.Bytes(), nil); sent.Ok {
-								// send face attributes string
-								if sent := b.SendMessage(chatId, &message, nil); !sent.Ok {
-									errorMessage = fmt.Sprintf("Failed to send face attributes: %s", *sent.Description)
+							if sent := b.SendPhotoWithBytes(chatId, buf.Bytes(), map[string]interface{}{
+								"caption": fmt.Sprintf("Process result of '%s'", command),
+							}); sent.Ok {
+								// reply to
+								var replyTo map[string]interface{} = nil
+								if command == Face {
+									replyTo = map[string]interface{}{
+										"reply_to_message_id": sent.Result.MessageId,
+									}
+								}
+
+								// send result string
+								if len(message) > 0 {
+									if sent := b.SendMessage(chatId, &message, replyTo); !sent.Ok {
+										errorMessage = fmt.Sprintf("Failed to send faces: %s", *sent.Description)
+									}
 								}
 							} else {
-								errorMessage = fmt.Sprintf("Failed to send a face-marked image: %s", *sent.Description)
+								errorMessage = fmt.Sprintf("Failed to send image: %s", *sent.Description)
 							}
+						} else {
+							errorMessage = fmt.Sprintf("Failed to encode image: %s", err)
 						}
 					} else {
 						errorMessage = fmt.Sprintf("Failed to decode image: %s", err)
@@ -513,7 +629,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 					errorMessage = fmt.Sprintf("Failed to open image: %s", err)
 				}
 			} else {
-				errorMessage = "No face detected. Given image may be too small or low-quality."
+				errorMessage = "No face detected on this image."
 			}
 		} else {
 			errorMessage = fmt.Sprintf("Failed to detect faces: %s", err)
@@ -532,7 +648,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 					errorMessage = fmt.Sprintf("Failed to send described text: %s", *sent.Description)
 				}
 			} else {
-				errorMessage = "Could not describe given image. It may be too small or low-quality."
+				errorMessage = "Could not describe given image."
 			}
 		} else {
 			errorMessage = fmt.Sprintf("Failed to describe image: %s", err)
@@ -555,7 +671,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 					errorMessage = fmt.Sprintf("Failed to send recognized text: %s", *sent.Description)
 				}
 			} else {
-				errorMessage = "Could not recognize any text from given image. It may be too small or low-quality."
+				errorMessage = "Could not recognize any text from given image."
 			}
 		} else {
 			errorMessage = fmt.Sprintf("Failed to recognize text: %s", err)
@@ -574,7 +690,7 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 					errorMessage = fmt.Sprintf("Failed to send recognized text: %s", *sent.Description)
 				}
 			} else {
-				errorMessage = "Could not recognize any text from given image. It may be too small or low-quality."
+				errorMessage = "Could not recognize any text from given image."
 			}
 		} else {
 			errorMessage = fmt.Sprintf("Failed to recognize handwritten text: %s", err)
@@ -593,13 +709,19 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 					errorMessage = fmt.Sprintf("Failed to send tags: %s", *sent.Description)
 				}
 			} else {
-				errorMessage = "Could not tag given image. It may be too small or low-quality."
+				errorMessage = "Could not tag given image."
 			}
 		} else {
 			errorMessage = fmt.Sprintf("Failed to tag image: %s", err)
 		}
+	default:
+		errorMessage = fmt.Sprintf("Command not supported: %s", command)
 	}
 
+	// delete original message
+	b.DeleteMessage(chatId, messageIdToDelete)
+
+	// if there was any error, send it back
 	if errorMessage != "" {
 		b.SendMessage(chatId, &errorMessage, nil)
 
@@ -611,6 +733,17 @@ func processImage(b *bot.Bot, chatId int64, fileUrl string, command CognitiveCom
 func colorForIndex(i int) color.RGBA {
 	length := len(colors)
 	return colors[i%length]
+}
+
+// check if give face landmarks has all requsted keys
+func hasAllKeys(keys []string, points map[string]cog.Point) bool {
+	for _, k := range keys {
+		if _, exists := points[k]; !exists {
+			return false
+		}
+	}
+
+	return true
 }
 
 func main() {

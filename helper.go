@@ -318,32 +318,32 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 									"mouthRight",
 									"mouthLeft",
 								}, f.FaceLandmarks) {
-									// nose tip
+									// mark nose tip
 									n, _ := f.FaceLandmarks["noseTip"]
-									gc.MoveTo(float64(n.X), float64(n.Y))
-									gc.ArcTo(float64(n.X), float64(n.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
+									gc.MoveTo(n.X, n.Y)
+									gc.ArcTo(n.X, n.Y, CircleRadius, CircleRadius, 0, -math.Pi*2)
 									gc.Close()
 									gc.FillStroke()
 
-									// right pupil
+									// mark right pupil
 									r, _ := f.FaceLandmarks["pupilRight"]
-									gc.MoveTo(float64(r.X), float64(r.Y))
-									gc.ArcTo(float64(r.X), float64(r.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
+									gc.MoveTo(r.X, r.Y)
+									gc.ArcTo(r.X, r.Y, CircleRadius, CircleRadius, 0, -math.Pi*2)
 									gc.Close()
 									gc.FillStroke()
 
-									// left pupil
+									// mark left pupil
 									l, _ := f.FaceLandmarks["pupilLeft"]
-									gc.MoveTo(float64(l.X), float64(l.Y))
-									gc.ArcTo(float64(l.X), float64(l.Y), CircleRadius, CircleRadius, 0, -math.Pi*2)
+									gc.MoveTo(l.X, l.Y)
+									gc.ArcTo(l.X, l.Y, CircleRadius, CircleRadius, 0, -math.Pi*2)
 									gc.Close()
 									gc.FillStroke()
 
-									// mouth
+									// mark mouth
 									m1, _ := f.FaceLandmarks["mouthRight"]
 									m2, _ := f.FaceLandmarks["mouthLeft"]
-									gc.MoveTo(float64(m1.X), float64(m1.Y))
-									gc.LineTo(float64(m2.X), float64(m2.Y))
+									gc.MoveTo(m1.X, m1.Y)
+									gc.LineTo(m2.X, m2.Y)
 									gc.Close()
 									gc.FillStroke()
 								}
@@ -385,7 +385,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 									"eyeRightBottom",
 									"eyeRightOuter",
 								}, f.FaceLandmarks) {
-									// points
+									// eye points
 									lt, _ := f.FaceLandmarks["eyeLeftTop"]
 									lb, _ := f.FaceLandmarks["eyeLeftBottom"]
 									lo, _ := f.FaceLandmarks["eyeLeftOuter"]
@@ -393,20 +393,18 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 									rb, _ := f.FaceLandmarks["eyeRightBottom"]
 									ro, _ := f.FaceLandmarks["eyeRightOuter"]
 
-									// mask size
-									w := math.Abs(float64(lo.X) - float64(ro.X))
-									h := math.Abs(math.Min(float64(lt.Y), float64(rt.Y)) - math.Max(float64(lb.Y), float64(rb.Y)))
-									marginX, marginY := w*0.2, h*0.3
+									// get mask points
+									lu, ll, rl, ru := genMaskPoints(lt, lb, lo, rt, rb, ro)
 
 									// set mask color
 									gc.SetFillColor(maskColor)
 
-									// fill mask rectangle
-									gc.MoveTo(float64(lo.X)-marginX, math.Min(float64(lt.Y), float64(rt.Y))-marginY)
-									gc.LineTo(float64(ro.X)+marginX, math.Min(float64(lt.Y), float64(rt.Y))-marginY)
-									gc.LineTo(float64(ro.X)+marginX, math.Max(float64(lb.Y), float64(rb.Y))+marginY)
-									gc.LineTo(float64(lo.X)-marginX, math.Max(float64(lb.Y), float64(rb.Y))+marginY)
-									gc.LineTo(float64(lo.X)-marginX, math.Min(float64(lt.Y), float64(rt.Y))-marginY)
+									// fill mask
+									gc.MoveTo(lu.X, lu.Y)
+									gc.LineTo(ll.X, ll.Y)
+									gc.LineTo(rl.X, rl.Y)
+									gc.LineTo(ru.X, ru.Y)
+									gc.LineTo(lu.X, lu.Y)
 									gc.Close()
 									gc.Fill()
 								}
@@ -598,4 +596,27 @@ func hasAllKeys(keys []string, points map[string]cog.Point) bool {
 	}
 
 	return true
+}
+
+// generate fully-masking points for given eye points
+func genMaskPoints(lt, lb, lo, rt, rb, ro cog.Point) (lu, ll, rl, ru cog.Point) {
+	lEyeHeight := math.Sqrt(math.Pow(lt.X-lb.X, 2.0) + math.Pow(lt.Y-lb.Y, 2.0))
+	rEyeHeight := math.Sqrt(math.Pow(rt.X-rb.X, 2.0) + math.Pow(rt.Y-rb.Y, 2.0))
+	eyesWidth := math.Sqrt(math.Pow(lo.X-ro.X, 2.0) + math.Pow(lo.Y-ro.Y, 2.0))
+
+	var dX, dY, marginX, marginY float64
+	marginX = eyesWidth * 0.2
+	marginY = math.Max(lEyeHeight, rEyeHeight) * 0.3
+	if lEyeHeight > rEyeHeight {
+		dX = math.Max(math.Abs(lt.X-lo.X), math.Abs(lb.X-lo.X)) + marginX
+		dY = math.Max(math.Abs(lt.Y-lo.Y), math.Abs(lb.Y-lo.Y)) + marginY
+	} else {
+		dX = math.Max(math.Abs(rt.X-ro.X), math.Abs(rb.X-ro.X)) + marginX
+		dY = math.Max(math.Abs(rt.Y-ro.Y), math.Abs(rb.Y-ro.Y)) + marginY
+	}
+
+	return cog.Point{X: lt.X - dX, Y: lt.Y - dY}, // left upper point
+		cog.Point{X: lb.X - dX, Y: lb.Y + dY}, // left lower point
+		cog.Point{X: rb.X + dX, Y: rb.Y + dY}, // right lower point
+		cog.Point{X: rt.X + dX, Y: rt.Y - dY} // right upper point
 }

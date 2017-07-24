@@ -54,12 +54,12 @@ func processUpdate(b *bot.Bot, update bot.Update) bool {
 		lastIndex := len(update.Message.Photo) - 1 // XXX - last one is the largest
 
 		options["reply_markup"] = bot.InlineKeyboardMarkup{
-			InlineKeyboard: genImageInlineKeyboards(*update.Message.Photo[lastIndex].FileId),
+			InlineKeyboard: genImageInlineKeyboards(update.Message.Photo[lastIndex].FileId),
 		}
 		message = MessageActionImage
 	} else if update.Message.HasDocument() && strings.HasPrefix(*update.Message.Document.MimeType, "image/") {
 		options["reply_markup"] = bot.InlineKeyboardMarkup{
-			InlineKeyboard: genImageInlineKeyboards(*update.Message.Document.FileId),
+			InlineKeyboard: genImageInlineKeyboards(update.Message.Document.FileId),
 		}
 		message = MessageActionImage
 	} else {
@@ -67,7 +67,7 @@ func processUpdate(b *bot.Bot, update bot.Update) bool {
 	}
 
 	// send message
-	if sent := b.SendMessage(update.Message.Chat.Id, &message, options); sent.Ok {
+	if sent := b.SendMessage(update.Message.Chat.Id, message, options); sent.Ok {
 		result = true
 	} else {
 		logError(fmt.Sprintf("Failed to send message: %s", *sent.Description))
@@ -92,7 +92,7 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 		command := cmdsMap[string(data[0])]
 		fileId := string(data[1:])
 
-		if fileResult := b.GetFile(&fileId); fileResult.Ok {
+		if fileResult := b.GetFile(fileId); fileResult.Ok {
 			fileUrl := b.GetFileUrl(*fileResult.Result)
 
 			if strings.Contains(*query.Message.Text, "image") {
@@ -102,7 +102,7 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 
 				// log request
 				if query.From.Username == nil {
-					username = *query.From.FirstName
+					username = query.From.FirstName
 				} else {
 					username = *query.From.Username
 				}
@@ -124,7 +124,7 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 			"chat_id":    query.Message.Chat.Id,
 			"message_id": query.Message.MessageId,
 		}
-		if apiResult := b.EditMessageText(&message, options); apiResult.Ok {
+		if apiResult := b.EditMessageText(message, options); apiResult.Ok {
 			result = true
 		} else {
 			logError(fmt.Sprintf("Failed to edit message text: %s", *apiResult.Description))
@@ -232,7 +232,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 								"caption": fmt.Sprintf("Process result of '%s'", command),
 							}); sent.Ok {
 								// send emotions string
-								if sent := b.SendMessage(chatId, &message, map[string]interface{}{
+								if sent := b.SendMessage(chatId, message, map[string]interface{}{
 									"reply_to_message_id": sent.Result.MessageId,
 								}); !sent.Ok {
 									errorMessage = fmt.Sprintf("Failed to send emotions: %s", *sent.Description)
@@ -452,7 +452,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 								// send result string
 								if len(message) > 0 {
-									if sent := b.SendMessage(chatId, &message, replyTo); !sent.Ok {
+									if sent := b.SendMessage(chatId, message, replyTo); !sent.Ok {
 										errorMessage = fmt.Sprintf("Failed to send faces: %s", *sent.Description)
 									}
 								}
@@ -484,7 +484,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send described text
-				if sent := b.SendMessage(chatId, &message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send described text: %s", *sent.Description)
 				}
 			} else {
@@ -507,7 +507,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send detected text
-				if sent := b.SendMessage(chatId, &message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send recognized text: %s", *sent.Description)
 				}
 			} else {
@@ -526,7 +526,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send detected text
-				if sent := b.SendMessage(chatId, &message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send recognized text: %s", *sent.Description)
 				}
 			} else {
@@ -545,7 +545,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send tags
-				if sent := b.SendMessage(chatId, &message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send tags: %s", *sent.Description)
 				}
 			} else {
@@ -563,7 +563,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 	// if there was any error, send it back
 	if errorMessage != "" {
-		b.SendMessage(chatId, &errorMessage, nil)
+		b.SendMessage(chatId, errorMessage, nil)
 
 		logError(errorMessage)
 	}
@@ -576,8 +576,9 @@ func genImageInlineKeyboards(fileId string) [][]bot.InlineKeyboardButton {
 		data[string(cmd)] = fmt.Sprintf("%s%s", shortCmdsMap[cmd], fileId)
 	}
 
+	cancel := CommandCancel
 	return append(bot.NewInlineKeyboardButtonsAsRowsWithCallbackData(data), []bot.InlineKeyboardButton{
-		bot.InlineKeyboardButton{Text: strings.Title(CommandCancel), CallbackData: CommandCancel},
+		bot.InlineKeyboardButton{Text: strings.Title(CommandCancel), CallbackData: &cancel},
 	})
 }
 

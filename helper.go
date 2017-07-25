@@ -228,7 +228,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 						// send a photo with rectangles drawn on detected faces
 						buf := new(bytes.Buffer)
 						if err := jpeg.Encode(buf, newImg, nil); err == nil {
-							if sent := b.SendPhotoWithBytes(chatId, buf.Bytes(), map[string]interface{}{
+							if sent := b.SendPhoto(chatId, buf.Bytes(), map[string]interface{}{
 								"caption": fmt.Sprintf("Process result of '%s'", command),
 							}); sent.Ok {
 								// send emotions string
@@ -439,7 +439,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 						// send a photo with rectangles drawn on detected faces
 						buf := new(bytes.Buffer)
 						if err := jpeg.Encode(buf, newImg, nil); err == nil {
-							if sent := b.SendPhotoWithBytes(chatId, buf.Bytes(), map[string]interface{}{
+							if sent := b.SendPhoto(chatId, buf.Bytes(), map[string]interface{}{
 								"caption": fmt.Sprintf("Process result of '%s'", command),
 							}); sent.Ok {
 								// reply to

@@ -24,13 +24,14 @@ import (
 	"github.com/meinside/loggly-go"
 )
 
-var client *bot.Bot = nil
-var logger *loggly.Loggly = nil
+var client *bot.Bot
+var logger *loggly.Loggly
 
 const (
-	AppName = "MSCognitiveServicesBot"
+	appName = "MSCognitiveServicesBot"
 )
 
+// LogglyLog struct
 type LogglyLog struct {
 	Application string      `json:"app"`
 	Severity    string      `json:"severity"`
@@ -38,6 +39,7 @@ type LogglyLog struct {
 	Object      interface{} `json:"obj,omitempty"`
 }
 
+// CognitiveCommand type
 type CognitiveCommand string
 
 // XXX - First letter of commands should be unique.
@@ -77,11 +79,11 @@ var faceClient *face.Client
 var font *truetype.Font
 
 const (
-	MessageActionImage     = "Choose action for this image:"
-	MessageUnprocessable   = "Unprocessable message."
-	MessageFailedToGetFile = "Failed to get file from the server."
-	MessageCanceled        = "Canceled."
-	MessageHelp            = `Send any image to this bot, and select one of the following actions:
+	messageActionImage     = "Choose action for this image:"
+	messageUnprocessable   = "Unprocessable message."
+	messageFailedToGetFile = "Failed to get file from the server."
+	messageCanceled        = "Canceled."
+	messageHelp            = `Send any image to this bot, and select one of the following actions:
 
 - Emotion Recognition
 - Face Detection
@@ -97,17 +99,18 @@ then it will send the result message and/or image back to you.
 * Github: https://github.com/meinside/telegram-ms-cognitive-bot
 `
 
-	CommandCancel = "cancel"
+	commandCancel = "cancel"
 
-	FontFilepath = "fonts/RobotoCondensed-Regular.ttf"
+	fontFilepath = "fonts/RobotoCondensed-Regular.ttf"
 )
 
 const (
-	ConfigFilename = "config.json"
+	configFilename = "config.json"
 )
 
+// Config struct
 type Config struct {
-	TelegramApiToken                string `json:"telegram-api-token"`
+	TelegramAPIToken                string `json:"telegram-api-token"`
 	TelegramMonitorIntervalSeconds  int    `json:"telegram-monitor-interval-seconds"`
 	MsEmotionSubscriptionKey        string `json:"ms-emotion-subscription-key"`
 	MsComputervisionSubscriptionKey string `json:"ms-computervision-subscription-key"`
@@ -120,7 +123,7 @@ var conf Config
 
 func init() {
 	// read from config file
-	if file, err := ioutil.ReadFile(ConfigFilename); err != nil {
+	if file, err := ioutil.ReadFile(configFilename); err != nil {
 		panic(err)
 	} else {
 		if err := json.Unmarshal(file, &conf); err != nil {
@@ -146,7 +149,7 @@ func init() {
 	}
 
 	// telegram
-	client = bot.NewClient(conf.TelegramApiToken)
+	client = bot.NewClient(conf.TelegramAPIToken)
 	client.Verbose = conf.IsVerbose
 
 	// loggly
@@ -155,7 +158,7 @@ func init() {
 	}
 
 	// others
-	if bytes, err := ioutil.ReadFile(FontFilepath); err == nil {
+	if bytes, err := ioutil.ReadFile(fontFilepath); err == nil {
 		if f, err := truetype.Parse(bytes); err == nil {
 			font = f
 		} else {
@@ -213,7 +216,7 @@ func logMessage(message string) {
 
 	if logger != nil {
 		logger.Log(LogglyLog{
-			Application: AppName,
+			Application: appName,
 			Severity:    "Log",
 			Message:     message,
 		})
@@ -226,7 +229,7 @@ func logError(message string) {
 
 	if logger != nil {
 		logger.Log(LogglyLog{
-			Application: AppName,
+			Application: appName,
 			Severity:    "Error",
 			Message:     message,
 		})
@@ -234,18 +237,18 @@ func logError(message string) {
 }
 
 // log request from user
-func logRequest(username, fileUrl string, command CognitiveCommand) {
+func logRequest(username, fileURL string, command CognitiveCommand) {
 	if logger != nil {
 		logger.Log(LogglyLog{
-			Application: AppName,
+			Application: appName,
 			Severity:    "Verbose",
 			Object: struct {
 				Username string           `json:"username"`
-				FileUrl  string           `json:"file_url"`
+				FileURL  string           `json:"file_url"`
 				Command  CognitiveCommand `json:"command"`
 			}{
 				Username: username,
-				FileUrl:  fileUrl,
+				FileURL:  fileURL,
 				Command:  command,
 			},
 		})

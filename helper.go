@@ -9,14 +9,15 @@ import (
 	"strings"
 
 	// for manipulating images
-	"github.com/disintegration/gift"
-	"github.com/golang/freetype"
-	"github.com/llgcode/draw2d/draw2dimg"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
 	"math"
+
+	"github.com/disintegration/gift"
+	"github.com/golang/freetype"
+	"github.com/llgcode/draw2d/draw2dimg"
 
 	// for MS Cognitive Services
 	cog "github.com/meinside/ms-cognitive-services-go"
@@ -25,6 +26,7 @@ import (
 	bot "github.com/meinside/telegram-bot-go"
 )
 
+// constants for drawing
 const (
 	CircleRadius = 6
 	StrokeWidth  = 7.0
@@ -47,27 +49,27 @@ func processUpdate(b *bot.Bot, update bot.Update) bool {
 
 	var message string
 	var options = map[string]interface{}{
-		"reply_to_message_id": update.Message.MessageId,
+		"reply_to_message_id": update.Message.MessageID,
 	}
 
 	if update.Message.HasPhoto() {
 		lastIndex := len(update.Message.Photo) - 1 // XXX - last one is the largest
 
 		options["reply_markup"] = bot.InlineKeyboardMarkup{
-			InlineKeyboard: genImageInlineKeyboards(update.Message.Photo[lastIndex].FileId),
+			InlineKeyboard: genImageInlineKeyboards(update.Message.Photo[lastIndex].FileID),
 		}
-		message = MessageActionImage
+		message = messageActionImage
 	} else if update.Message.HasDocument() && strings.HasPrefix(*update.Message.Document.MimeType, "image/") {
 		options["reply_markup"] = bot.InlineKeyboardMarkup{
-			InlineKeyboard: genImageInlineKeyboards(update.Message.Document.FileId),
+			InlineKeyboard: genImageInlineKeyboards(update.Message.Document.FileID),
 		}
-		message = MessageActionImage
+		message = messageActionImage
 	} else {
-		message = MessageHelp
+		message = messageHelp
 	}
 
 	// send message
-	if sent := b.SendMessage(update.Message.Chat.Id, message, options); sent.Ok {
+	if sent := b.SendMessage(update.Message.Chat.ID, message, options); sent.Ok {
 		result = true
 	} else {
 		logError(fmt.Sprintf("Failed to send message: %s", *sent.Description))
@@ -86,17 +88,17 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 	query := *update.CallbackQuery
 	data := *query.Data
 
-	if data == CommandCancel {
-		message = MessageCanceled
+	if data == commandCancel {
+		message = messageCanceled
 	} else {
 		command := cmdsMap[string(data[0])]
-		fileId := string(data[1:])
+		fileID := string(data[1:])
 
-		if fileResult := b.GetFile(fileId); fileResult.Ok {
-			fileUrl := b.GetFileUrl(*fileResult.Result)
+		if fileResult := b.GetFile(fileID); fileResult.Ok {
+			fileURL := b.GetFileURL(*fileResult.Result)
 
 			if strings.Contains(*query.Message.Text, "image") {
-				go processImage(b, query.Message.Chat.Id, query.Message.MessageId, fileUrl, command)
+				go processImage(b, query.Message.Chat.ID, query.Message.MessageID, fileURL, command)
 
 				message = fmt.Sprintf("Processing '%s' on received image...", command)
 
@@ -106,23 +108,23 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 				} else {
 					username = *query.From.Username
 				}
-				logRequest(username, fileUrl, command)
+				logRequest(username, fileURL, command)
 			} else {
-				message = MessageUnprocessable
+				message = messageUnprocessable
 			}
 		} else {
 			logError(fmt.Sprintf("Failed to get file from url: %s", *fileResult.Description))
 
-			message = MessageFailedToGetFile
+			message = messageFailedToGetFile
 		}
 	}
 
 	// answer callback query
-	if apiResult := b.AnswerCallbackQuery(query.Id, nil); apiResult.Ok {
+	if apiResult := b.AnswerCallbackQuery(query.ID, nil); apiResult.Ok {
 		// edit message and remove inline keyboards
 		options := map[string]interface{}{
-			"chat_id":    query.Message.Chat.Id,
-			"message_id": query.Message.MessageId,
+			"chat_id":    query.Message.Chat.ID,
+			"message_id": query.Message.MessageID,
 		}
 		if apiResult := b.EditMessageText(message, options); apiResult.Ok {
 			result = true
@@ -137,20 +139,20 @@ func processCallbackQuery(b *bot.Bot, update bot.Update) bool {
 }
 
 // process requested image processing
-func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl string, command CognitiveCommand) {
+func processImage(b *bot.Bot, chatID int64, messageIDToDelete int, fileURL string, command CognitiveCommand) {
 	message := ""
 	errorMessage := ""
 
 	// 'typing...'
-	b.SendChatAction(chatId, bot.ChatActionTyping)
+	b.SendChatAction(chatID, bot.ChatActionTyping)
 
 	switch command {
 	case Emotion:
 		// send a photo (draw squares on detected faces) and emotions in text
-		if emotions, err := emotionClient.RecognizeImage(fileUrl, nil); err == nil {
+		if emotions, err := emotionClient.RecognizeImage(fileURL, nil); err == nil {
 			if len(emotions) > 0 {
 				// open image from url,
-				if resp, err := http.Get(fileUrl); err == nil {
+				if resp, err := http.Get(fileURL); err == nil {
 					defer resp.Body.Close()
 					if img, _, err := image.Decode(resp.Body); err == nil {
 						var rect cog.Rectangle
@@ -223,17 +225,17 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 						message = fmt.Sprintf("%s", strings.Join(strs, "\n\n"))
 
 						// 'uploading photo...'
-						b.SendChatAction(chatId, bot.ChatActionUploadPhoto)
+						b.SendChatAction(chatID, bot.ChatActionUploadPhoto)
 
 						// send a photo with rectangles drawn on detected faces
 						buf := new(bytes.Buffer)
 						if err := jpeg.Encode(buf, newImg, nil); err == nil {
-							if sent := b.SendPhoto(chatId, bot.InputFileFromBytes(buf.Bytes()), map[string]interface{}{
+							if sent := b.SendPhoto(chatID, bot.InputFileFromBytes(buf.Bytes()), map[string]interface{}{
 								"caption": fmt.Sprintf("Process result of '%s'", command),
 							}); sent.Ok {
 								// send emotions string
-								if sent := b.SendMessage(chatId, message, map[string]interface{}{
-									"reply_to_message_id": sent.Result.MessageId,
+								if sent := b.SendMessage(chatID, message, map[string]interface{}{
+									"reply_to_message_id": sent.Result.MessageID,
 								}); !sent.Ok {
 									errorMessage = fmt.Sprintf("Failed to send emotions: %s", *sent.Description)
 								}
@@ -254,10 +256,10 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 			errorMessage = fmt.Sprintf("Failed to recognize emotion: %s", err)
 		}
 	case Face, CensorEyes, MaskFaces:
-		if faces, err := faceClient.Detect(fileUrl, true, true, []string{"age", "gender", "headPose", "smile", "facialHair", "glasses", "emotion"}); err == nil {
+		if faces, err := faceClient.Detect(fileURL, true, true, []string{"age", "gender", "headPose", "smile", "facialHair", "glasses", "emotion"}); err == nil {
 			if len(faces) > 0 {
 				// open image from url,
-				if resp, err := http.Get(fileUrl); err == nil {
+				if resp, err := http.Get(fileURL); err == nil {
 					defer resp.Body.Close()
 					if img, _, err := image.Decode(resp.Body); err == nil {
 						var rect cog.Rectangle
@@ -434,25 +436,25 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 						}
 
 						// 'uploading photo...'
-						b.SendChatAction(chatId, bot.ChatActionUploadPhoto)
+						b.SendChatAction(chatID, bot.ChatActionUploadPhoto)
 
 						// send a photo with rectangles drawn on detected faces
 						buf := new(bytes.Buffer)
 						if err := jpeg.Encode(buf, newImg, nil); err == nil {
-							if sent := b.SendPhoto(chatId, bot.InputFileFromBytes(buf.Bytes()), map[string]interface{}{
+							if sent := b.SendPhoto(chatID, bot.InputFileFromBytes(buf.Bytes()), map[string]interface{}{
 								"caption": fmt.Sprintf("Process result of '%s'", command),
 							}); sent.Ok {
 								// reply to
 								var replyTo map[string]interface{} = nil
 								if command == Face {
 									replyTo = map[string]interface{}{
-										"reply_to_message_id": sent.Result.MessageId,
+										"reply_to_message_id": sent.Result.MessageID,
 									}
 								}
 
 								// send result string
 								if len(message) > 0 {
-									if sent := b.SendMessage(chatId, message, replyTo); !sent.Ok {
+									if sent := b.SendMessage(chatID, message, replyTo); !sent.Ok {
 										errorMessage = fmt.Sprintf("Failed to send faces: %s", *sent.Description)
 									}
 								}
@@ -475,7 +477,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 			errorMessage = fmt.Sprintf("Failed to detect faces: %s", err)
 		}
 	case Describe:
-		if described, err := cvClient.DescribeImage(fileUrl, 0); err == nil {
+		if described, err := cvClient.DescribeImage(fileURL, 0); err == nil {
 			captions := []string{}
 			for _, c := range described.Description.Captions {
 				captions = append(captions, fmt.Sprintf("%s (%.3f%%)", c.Text, c.Confidence*100.0))
@@ -484,7 +486,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send described text
-				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatID, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send described text: %s", *sent.Description)
 				}
 			} else {
@@ -494,7 +496,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 			errorMessage = fmt.Sprintf("Failed to describe image: %s", err)
 		}
 	case Ocr:
-		if recognized, err := cvClient.Ocr(fileUrl, "unk", true); err == nil {
+		if recognized, err := cvClient.Ocr(fileURL, "unk", true); err == nil {
 			words := []string{}
 			for _, r := range recognized.Regions {
 				for _, l := range r.Lines {
@@ -507,7 +509,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send detected text
-				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatID, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send recognized text: %s", *sent.Description)
 				}
 			} else {
@@ -517,7 +519,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 			errorMessage = fmt.Sprintf("Failed to recognize text: %s", err)
 		}
 	case Handwritten:
-		if recognized, err := cvClient.RecognizeHandwritten(fileUrl, true, nil); err == nil {
+		if recognized, err := cvClient.RecognizeHandwritten(fileURL, true, nil); err == nil {
 			words := []string{}
 			for _, l := range recognized.Lines {
 				words = append(words, l.Text)
@@ -526,7 +528,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send detected text
-				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatID, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send recognized text: %s", *sent.Description)
 				}
 			} else {
@@ -536,7 +538,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 			errorMessage = fmt.Sprintf("Failed to recognize handwritten text: %s", err)
 		}
 	case Tag:
-		if recognized, err := cvClient.TagImage(fileUrl); err == nil {
+		if recognized, err := cvClient.TagImage(fileURL); err == nil {
 			tags := []string{}
 			for _, t := range recognized.Tags {
 				tags = append(tags, fmt.Sprintf("%s (%.3f%%)", t.Name, t.Confidence*100.0))
@@ -545,7 +547,7 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 
 			if len(strings.TrimSpace(message)) > 0 {
 				// send tags
-				if sent := b.SendMessage(chatId, message, nil); !sent.Ok {
+				if sent := b.SendMessage(chatID, message, nil); !sent.Ok {
 					errorMessage = fmt.Sprintf("Failed to send tags: %s", *sent.Description)
 				}
 			} else {
@@ -559,26 +561,26 @@ func processImage(b *bot.Bot, chatId int64, messageIdToDelete int, fileUrl strin
 	}
 
 	// delete original message
-	b.DeleteMessage(chatId, messageIdToDelete)
+	b.DeleteMessage(chatID, messageIDToDelete)
 
 	// if there was any error, send it back
 	if errorMessage != "" {
-		b.SendMessage(chatId, errorMessage, nil)
+		b.SendMessage(chatID, errorMessage, nil)
 
 		logError(errorMessage)
 	}
 }
 
 // generate inline keyboards for selecting action
-func genImageInlineKeyboards(fileId string) [][]bot.InlineKeyboardButton {
+func genImageInlineKeyboards(fileID string) [][]bot.InlineKeyboardButton {
 	data := map[string]string{}
 	for _, cmd := range allCmds {
-		data[string(cmd)] = fmt.Sprintf("%s%s", shortCmdsMap[cmd], fileId)
+		data[string(cmd)] = fmt.Sprintf("%s%s", shortCmdsMap[cmd], fileID)
 	}
 
-	cancel := CommandCancel
+	cancel := commandCancel
 	return append(bot.NewInlineKeyboardButtonsAsRowsWithCallbackData(data), []bot.InlineKeyboardButton{
-		bot.InlineKeyboardButton{Text: strings.Title(CommandCancel), CallbackData: &cancel},
+		bot.InlineKeyboardButton{Text: strings.Title(commandCancel), CallbackData: &cancel},
 	})
 }
 
